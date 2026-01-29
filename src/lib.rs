@@ -1,26 +1,3 @@
-pub trait MMU {
-    fn write_halfword(&mut self, addr: u16, value: u16);
-    fn read_halfword(&self, addr: u16) -> Option<u16>;
-
-    /// Intended for loading initial program/data into memory before execution
-    /// Skips any protections (e.g. writing to ROM)
-    /// and doesn't have side effects
-    fn setup_write_halfword(&mut self, _addr: u16, _value: u16);
-
-    /// Intended for loading initial program/data into memory before execution
-    /// Skips any protections
-    /// and doesn't have side effects
-    fn setup_read_halfword(&mut self, _addr: u16) -> Option<u16>;
-
-    fn dump_memory(&self, start_addr: u16, end_addr: u16) -> Vec<u16> {
-        let mut memory_dump = Vec::new();
-        for addr in (start_addr..end_addr).step_by(2) {
-            memory_dump.push(self.read_halfword(addr).unwrap_or(0));
-        }
-        memory_dump
-    }
-}
-
 const UNINITIALIZED_REGISTER_PATTERN: u16 = 0x0000;
 fn unwrap_register(reg: Option<u16>) -> u16 {
     match reg {
@@ -31,11 +8,11 @@ fn unwrap_register(reg: Option<u16>) -> u16 {
 
 pub struct DCoreCPU {
     /// R0-R15 Registers of D-Core CPU
-    /// These start out uninitialized to 0xf0f0
+    /// These start out uninitialized to 0x0000
     pub registers: [Option<u16>; 16],
     pub pc: u16,
     pub carry: bool,
-    pub mmu: Box<dyn MMU>,
+    pub mmu: DCoreMMU,
     pub halted: bool,
 }
 
@@ -53,10 +30,10 @@ impl DCoreCPU {
             pc: 0,
             carry: false,
             halted: false,
-            mmu: Box::new(DCoreMinimalMMU {
+            mmu: DCoreMMU {
                 rom_chip: [None; 32768],
                 ram_chip: [None; 32768],
-            }),
+            },
         }
     }
 
@@ -347,12 +324,12 @@ fn unwrap_memory(mem: Option<u16>) -> u16 {
     }
 }
 
-pub struct DCoreMinimalMMU {
+pub struct DCoreMMU {
     pub rom_chip: [Option<u8>; 32768],
     pub ram_chip: [Option<u8>; 32768],
 }
 
-impl MMU for DCoreMinimalMMU {
+impl DCoreMMU {
     fn write_halfword(&mut self, addr: u16, value: u16) {
         if (0x7FFF..0x8000).contains(&addr) || addr == 0xFFFF {
             return;
