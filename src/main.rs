@@ -1,5 +1,3 @@
-use std::io::Write;
-
 use d_core::DCoreCPU;
 
 fn main() {
@@ -124,17 +122,37 @@ fn main() {
     core.mmu.setup_write_halfword(0x00A6, 0x352F);
     core.mmu.setup_write_halfword(0x00A8, 0xC00F);
 
+    core.mmu.write_string(0x9000, "Schritt ");
+    core.mmu.write_string(0x9020, ": ");
+    core.mmu.write_string(0x9040, " -> ");
+
     while !core.halted {
         let mut outstring = String::from("\n");
+        let (dbg_before, instruction, dbg_after) = core.step();
 
-        outstring.push_str(&format!("PC: {:04x}\n", core.pc));
-        for reg in core.registers {
+        outstring.push_str("========================================\n");
+        if let Some(instr) = instruction.as_ref() {
+            outstring.push_str(&format!("Instruction: {}\n", instr));
+        } else {
+            outstring.push_str("Instruction: <unknown>\n");
+        }
+        outstring.push_str(&format!("PC: {:04x}\n", dbg_before.pc));
+        outstring.push_str("Registers:\n");
+        for reg in dbg_before.registers {
             outstring.push_str(&format!("{:04x} ", reg.unwrap_or(0)));
         }
         outstring.push('\n');
-        print!("{}", outstring);
-        std::io::stdout().flush().unwrap();
-        core.step();
+        outstring.push_str("-- after --\n");
+
+        outstring.push_str(&format!("PC: {:04x}\n", dbg_after.pc));
+        outstring.push_str("Registers:\n");
+        for reg in dbg_after.registers {
+            outstring.push_str(&format!("{:04x} ", reg.unwrap_or(0)));
+        }
+        outstring.push('\n');
+
+        // print!("{}", outstring);
+        // std::io::stdout().flush().unwrap();
         // let _ = std::io::stdin().read_line(&mut String::new());
     }
 }
