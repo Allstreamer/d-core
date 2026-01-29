@@ -1,5 +1,3 @@
-use std::mem;
-
 pub trait MMU {
     fn write_halfword(&mut self, addr: u16, value: u16);
     fn read_halfword(&self, addr: u16) -> Option<u16>;
@@ -91,34 +89,28 @@ impl DCoreCPU {
             }
             // br
             0b1000 => {
-                let mut imm_12_i16 = u16::cast_signed(imm_12 << 4) >> 4;
-
-                if imm_12_i16 > 0 {
-                    self.pc = self.pc.wrapping_add(imm_12);
-                } else {
-                    self.pc = self.pc.wrapping_sub((imm_12_i16 as i32).abs() as u16);
-                }
-                println!("br {}", (imm_12_i16));
+                let pc_offset = self.br_pc_to_imm12(imm_12);
+                println!("br {}", (pc_offset));
             }
             // jsr
             0b1001 => {
                 self.registers[15] = Some(self.pc + 2);
-                self.pc += 2 + imm_12;
-                println!("jsr {}", imm_12);
+                let pc_offset = self.br_pc_to_imm12(imm_12);
+                println!("jsr {}", pc_offset);
             }
             // bt
             0b1010 => {
                 if self.carry {
-                    self.pc += 2 + imm_12;
+                    let _ = self.br_pc_to_imm12(imm_12);
                 }
-                println!("bt {}", imm_12);
+                println!("bt {}", Self::calculate_signed_imm12(imm_12));
             }
             // bf
             0b1011 => {
                 if !self.carry {
-                    self.pc += 2 + imm_12;
+                    let _ = self.br_pc_to_imm12(imm_12);
                 }
-                println!("bf {}", imm_12);
+                println!("bf {}", Self::calculate_signed_imm12(imm_12));
             }
             // jmp
             0b1100 => {
@@ -135,6 +127,23 @@ impl DCoreCPU {
                 println!("Unknown opcode {:04x} at PC {:04x}", opcode, self.pc);
             }
         }
+    }
+
+    fn calculate_signed_imm12(imm12: u16) -> i16 {
+        u16::cast_signed(imm12 << 4) >> 4
+    }
+
+    /// PC = PC + 2 + imm12 (signed)
+    fn br_pc_to_imm12(&mut self, _imm12: u16) -> i16 {
+        let imm_12_i16 = Self::calculate_signed_imm12(_imm12);
+
+        if imm_12_i16 > 0 {
+            self.pc = self.pc.wrapping_add(_imm12);
+        } else {
+            self.pc = self.pc.wrapping_sub(imm_12_i16.unsigned_abs());
+        }
+
+        imm_12_i16
     }
 
     fn alu_operation(&mut self, alu_opc: u16, x_reg: u16, y_reg: u16, imm4: u16) {
