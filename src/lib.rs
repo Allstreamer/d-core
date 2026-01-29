@@ -11,6 +11,14 @@ pub trait MMU {
     /// Skips any protections
     /// and doesn't have side effects
     fn setup_read_halfword(&mut self, _addr: u16) -> Option<u16>;
+
+    fn dump_memory(&self, start_addr: u16, end_addr: u16) -> Vec<u16> {
+        let mut memory_dump = Vec::new();
+        for addr in (start_addr..end_addr).step_by(2) {
+            memory_dump.push(self.read_halfword(addr).unwrap_or(0));
+        }
+        memory_dump
+    }
 }
 
 const UNINITIALIZED_REGISTER_PATTERN: u16 = 0x0000;
@@ -64,7 +72,7 @@ impl DCoreCPU {
         let x_register = 0x000f & instruction;
         let y_register = (0x00f0 & instruction) >> 4;
         let alu_opc = (0x1f00 & instruction) >> 8;
-        let stw_xa = (0x0f00 & instruction) >> 4;
+        let stw_xa = (0x0f00 & instruction) >> 8;
         let imm_12 = 0x0fff & instruction;
         let imm_4 = (0x00f0 & instruction) >> 4;
 
@@ -74,17 +82,19 @@ impl DCoreCPU {
             0b0010 | 0b0011 => self.alu_operation(alu_opc, x_register, y_register, imm_4),
             // ldw
             0b0100 => {
-                self.registers[x_register as usize] = Some(unwrap_memory(self.mmu.read_halfword(
-                    unwrap_register(self.registers[y_register as usize + stw_xa as usize]),
-                )));
+                let base_addr = unwrap_register(self.registers[y_register as usize]);
+                let addr = base_addr.wrapping_add(stw_xa << 1);
+
+                self.registers[x_register as usize] =
+                    Some(unwrap_memory(self.mmu.read_halfword(addr)));
                 println!("ldw R{}, {}(R{})", x_register, stw_xa, y_register);
             }
             // stw
             0b0101 => {
-                self.mmu.write_halfword(
-                    unwrap_register(self.registers[y_register as usize + stw_xa as usize]),
-                    unwrap_register(self.registers[x_register as usize]),
-                );
+                let base_addr = unwrap_register(self.registers[y_register as usize]);
+                let addr = base_addr.wrapping_add(stw_xa << 1);
+                self.mmu
+                    .write_halfword(addr, unwrap_register(self.registers[x_register as usize]));
                 println!("stw R{}, {}(R{})", x_register, stw_xa, y_register);
             }
             // br
@@ -94,7 +104,7 @@ impl DCoreCPU {
             }
             // jsr
             0b1001 => {
-                self.registers[15] = Some(self.pc + 2);
+                self.registers[15] = Some(self.pc);
                 let pc_offset = self.br_pc_to_imm12(imm_12);
                 println!("jsr {}", pc_offset);
             }
@@ -125,6 +135,7 @@ impl DCoreCPU {
             }
             _ => {
                 println!("Unknown opcode {:04x} at PC {:04x}", opcode, self.pc);
+                println!("Instruction was {:04x}", instruction);
             }
         }
     }
@@ -337,40 +348,69 @@ fn unwrap_memory(mem: Option<u16>) -> u16 {
 }
 
 pub struct DCoreMinimalMMU {
-    pub rom_chip: [Option<u16>; 32768],
-    pub ram_chip: [Option<u16>; 32768],
+    pub rom_chip: [Option<u8>; 32768],
+    pub ram_chip: [Option<u8>; 32768],
 }
 
 impl MMU for DCoreMinimalMMU {
     fn write_halfword(&mut self, addr: u16, value: u16) {
+        if (0x7FFF..0x8000).contains(&addr) || addr == 0xFFFF {
+            return;
+        }
+
         if addr < 0x8000 {
             println!("Attempted write to ROM at address {:04x}", addr);
         } else {
-            let ram_addr = addr - 0x8000;
-            self.ram_chip[(ram_addr) as usize] = Some(value);
+            let ram_addr = (addr - 0x8000) as usize;
+            self.ram_chip[ram_addr] = Some((value & 0xFF) as u8);
+            self.ram_chip[ram_addr + 1] = Some((value >> 8) as u8);
         }
     }
 
     fn read_halfword(&self, addr: u16) -> Option<u16> {
-        if addr < 0x8000 {
-            self.rom_chip[addr as usize]
+        let chip = if addr < 0x8000 {
+            &self.rom_chip
         } else {
-            let ram_addr = addr - 0x8000;
-            self.ram_chip[ram_addr as usize]
+            &self.ram_chip
+        };
+        let offset = if addr < 0x8000 {
+            addr as usize
+        } else {
+            (addr - 0x8000) as usize
+        };
+
+        if offset >= 32767 {
+            return None;
+        }
+
+        match (chip[offset], chip[offset + 1]) {
+            (Some(l), Some(u)) => Some(((u as u16) << 8) | (l as u16)),
+            _ => None,
         }
     }
 
-    /// Is allowed to write to ROM for setup purposes
     fn setup_write_halfword(&mut self, _addr: u16, _value: u16) {
-        if _addr < 0x8000 {
-            self.rom_chip[(_addr) as usize] = Some(_value);
+        let (chip, offset) = if _addr < 0x8000 {
+            (&mut self.rom_chip, _addr as usize)
         } else {
-            let ram_addr = _addr - 0x8000;
-            self.ram_chip[(ram_addr) as usize] = Some(_value);
+            (&mut self.ram_chip, (_addr - 0x8000) as usize)
+        };
+
+        if offset < 32767 {
+            chip[offset] = Some((_value & 0xFF) as u8);
+            chip[offset + 1] = Some(((_value & 0xFF00) >> 8) as u8);
         }
     }
 
     fn setup_read_halfword(&mut self, _addr: u16) -> Option<u16> {
         self.read_halfword(_addr)
+    }
+
+    fn dump_memory(&self, start_addr: u16, end_addr: u16) -> Vec<u16> {
+        let mut memory_dump = Vec::new();
+        for addr in (start_addr..end_addr).step_by(2) {
+            memory_dump.push(self.read_halfword(addr).unwrap_or(0));
+        }
+        memory_dump
     }
 }

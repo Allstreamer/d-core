@@ -135,6 +135,6 @@ fn main() {
         print!("{}", outstring);
         std::io::stdout().flush().unwrap();
         core.step();
-        let _ = std::io::stdin().read_line(&mut String::new());
+        // let _ = std::io::stdin().read_line(&mut String::new());
     }
 }
