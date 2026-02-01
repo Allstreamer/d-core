@@ -303,6 +303,7 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
             _ => unreachable!(),
         });
 
+    // ldw R0, (R1)
     // ldw R0, 0(R1)
     // stw R5, 4(R8)
     // ldw R2, -21(R2)
@@ -313,15 +314,26 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
         .then(register)
         .then_ignore(just(',').padded())
         .then(
+            // Make the immediate OPTIONAL
             immediate
+                .or_not()
                 .then_ignore(just('(').padded())
                 .then(register)
                 .then_ignore(just(')').padded()),
         )
-        .map(|((identifier, reg1), (imm, reg2))| match identifier {
-            "ldw" => DCoreAsmAST::LdW(Box::new(reg1), Box::new(imm), Box::new(reg2)),
-            "stw" => DCoreAsmAST::StW(Box::new(reg1), Box::new(imm), Box::new(reg2)),
-            _ => unreachable!(),
+        .map(|((identifier, reg_dest), (offset_opt, reg_addr))| {
+            // If offset is missing, default to 0
+            let offset = offset_opt.unwrap_or(Atom::Number(0));
+
+            // Note: You might want to add validation here or in a later pass
+            // to ensure 'offset' is between 0 and 31  and not negative.
+
+            let opcode = identifier.to_lowercase();
+            match opcode.as_str() {
+                "ldw" => DCoreAsmAST::LdW(Box::new(reg_dest), Box::new(offset), Box::new(reg_addr)),
+                "stw" => DCoreAsmAST::StW(Box::new(reg_dest), Box::new(offset), Box::new(reg_addr)),
+                _ => unreachable!(),
+            }
         });
 
     let instruction = choice((
