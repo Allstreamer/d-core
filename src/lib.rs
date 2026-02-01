@@ -667,4 +667,20 @@ impl DCoreMMU {
             self.setup_write_halfword(current_addr, value);
         }
     }
+
+    pub fn wipe_all(&mut self) {
+        self.rom_rom();
+        self.clear_memory();
+    }
+
+    pub fn rom_rom(&mut self) {
+        for byte in self.rom_chip.iter_mut() {
+            *byte = None;
+        }
+    }
+    pub fn clear_memory(&mut self) {
+        for byte in self.ram_chip.iter_mut() {
+            *byte = None;
+        }
+    }
 }

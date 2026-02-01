@@ -118,16 +118,30 @@ pub enum DCoreAsmAST {
     Assho(Box<Atom>), // Define ASCII string
     End,
 }
+fn keyword<'src>(k: &'static str) -> impl Parser<'src, &'src str, &'src str> + Clone {
+    // 1. Determine if we need to look for a dot
+    let parser = if k.starts_with('.') {
+        // Parse a dot followed by an ident, but return the slice covering BOTH
+        just('.').then(text::ident()).to_slice().boxed()
+    } else {
+        text::ident().boxed()
+    };
+
+    // 2. Filter using the full string (case-insensitive)
+    parser
+        .filter(move |s: &&str| s.eq_ignore_ascii_case(k))
+        .map(|s: &str| s)
+}
 
 pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
     let comment = just(";")
         .then(any().and_is(just('\n').not()).repeated())
         .padded();
 
-    let hex_prefix = just("0x").or(just("$"));
+    let hex_prefix = choice((just("0x"), just("0X"), just("$")));
 
     // Parse Registers: R0 to R15
-    let register = just('r')
+    let register = choice((just("r"), just("R")))
         .ignore_then(text::int(10))
         .padded()
         .map(|s: &str| s.parse::<u8>().unwrap())
@@ -135,13 +149,13 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
         .map(Atom::Register);
 
     let no_param_instr = choice((
-        just(".prnewline"),
-        just("halt"),
-        // just("eepc"),
-        just("rfi"),
-        just(".end"),
+        keyword(".prnewline"),
+        keyword("halt"),
+        // keyword("eepc"),
+        keyword("rfi"),
+        keyword(".end"),
     ))
-    .map(|s| match s {
+    .map(|s| match s.to_lowercase().as_str() {
         ".prnewline" => DCoreAsmAST::PrNewLine,
         "halt" => DCoreAsmAST::Halt,
         // "eepc" => DCoreAsmAST::Eepc,
@@ -151,69 +165,73 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
     });
 
     let one_register_instr = choice((
-        just(".prdez"),
-        just(".prstr"),
-        just("not"),
-        just("lslc"),
-        just("lsrc"),
-        just("asrc"),
-        just("jmp"),
-        just(".push"),
-        just(".pop"),
-        just(".stack"),
+        keyword(".prdez"),
+        keyword(".prstr"),
+        keyword("not"),
+        keyword("lslc"),
+        keyword("lsrc"),
+        keyword("asrc"),
+        keyword("jmp"),
+        keyword(".push"),
+        keyword(".pop"),
+        keyword(".stack"),
     ))
     .padded()
     .then(register)
-    .map(|(identifier, reg)| match identifier {
-        ".prdez" => DCoreAsmAST::PrDez(Box::new(reg)),
-        ".prstr" => DCoreAsmAST::PrStr(Box::new(reg)),
-        "not" => DCoreAsmAST::Not(Box::new(reg)),
-        "lslc" => DCoreAsmAST::LslC(Box::new(reg)),
-        "lsrc" => DCoreAsmAST::LsrC(Box::new(reg)),
-        "asrc" => DCoreAsmAST::AsrC(Box::new(reg)),
-        "jmp" => DCoreAsmAST::Jmp(Box::new(reg)),
-        ".push" => DCoreAsmAST::Push(Box::new(reg)),
-        ".pop" => DCoreAsmAST::Pop(Box::new(reg)),
-        ".stack" => DCoreAsmAST::Stack(Box::new(reg)),
-        _ => unreachable!(),
-    });
+    .map(
+        |(identifier, reg)| match identifier.to_lowercase().as_str() {
+            ".prdez" => DCoreAsmAST::PrDez(Box::new(reg)),
+            ".prstr" => DCoreAsmAST::PrStr(Box::new(reg)),
+            "not" => DCoreAsmAST::Not(Box::new(reg)),
+            "lslc" => DCoreAsmAST::LslC(Box::new(reg)),
+            "lsrc" => DCoreAsmAST::LsrC(Box::new(reg)),
+            "asrc" => DCoreAsmAST::AsrC(Box::new(reg)),
+            "jmp" => DCoreAsmAST::Jmp(Box::new(reg)),
+            ".push" => DCoreAsmAST::Push(Box::new(reg)),
+            ".pop" => DCoreAsmAST::Pop(Box::new(reg)),
+            ".stack" => DCoreAsmAST::Stack(Box::new(reg)),
+            _ => unreachable!(),
+        },
+    );
 
     let two_register_instr = choice((
-        just("mov"),
-        just("addu"),
-        just("addc"),
-        just("subu"),
-        just("and"),
-        just("or"),
-        just("xor"),
-        just("lsl"),
-        just("lsr"),
-        just("asr"),
-        just("cmpe"),
-        just("cmpne"),
-        just("cmpgt"),
-        just("cmplt"),
+        keyword("mov"),
+        keyword("addu"),
+        keyword("addc"),
+        keyword("subu"),
+        keyword("and"),
+        keyword("or"),
+        keyword("xor"),
+        keyword("lsl"),
+        keyword("lsr"),
+        keyword("asr"),
+        keyword("cmpe"),
+        keyword("cmpne"),
+        keyword("cmpgt"),
+        keyword("cmplt"),
     ))
     .padded()
     .then(register)
     .then(just(',').padded().ignore_then(register))
-    .map(|((identifier, reg1), reg2)| match identifier {
-        "mov" => DCoreAsmAST::Mov(Box::new(reg1), Box::new(reg2)),
-        "addu" => DCoreAsmAST::AddU(Box::new(reg1), Box::new(reg2)),
-        "addc" => DCoreAsmAST::AddC(Box::new(reg1), Box::new(reg2)),
-        "subu" => DCoreAsmAST::SubU(Box::new(reg1), Box::new(reg2)),
-        "and" => DCoreAsmAST::And(Box::new(reg1), Box::new(reg2)),
-        "or" => DCoreAsmAST::Or(Box::new(reg1), Box::new(reg2)),
-        "xor" => DCoreAsmAST::Xor(Box::new(reg1), Box::new(reg2)),
-        "lsl" => DCoreAsmAST::Lsl(Box::new(reg1), Box::new(reg2)),
-        "lsr" => DCoreAsmAST::Lsr(Box::new(reg1), Box::new(reg2)),
-        "asr" => DCoreAsmAST::Asr(Box::new(reg1), Box::new(reg2)),
-        "cmpe" => DCoreAsmAST::CmpE(Box::new(reg1), Box::new(reg2)),
-        "cmpne" => DCoreAsmAST::CmpNE(Box::new(reg1), Box::new(reg2)),
-        "cmpgt" => DCoreAsmAST::CmpGT(Box::new(reg1), Box::new(reg2)),
-        "cmplt" => DCoreAsmAST::CmpLT(Box::new(reg1), Box::new(reg2)),
-        _ => unreachable!(),
-    });
+    .map(
+        |((identifier, reg1), reg2)| match identifier.to_lowercase().as_str() {
+            "mov" => DCoreAsmAST::Mov(Box::new(reg1), Box::new(reg2)),
+            "addu" => DCoreAsmAST::AddU(Box::new(reg1), Box::new(reg2)),
+            "addc" => DCoreAsmAST::AddC(Box::new(reg1), Box::new(reg2)),
+            "subu" => DCoreAsmAST::SubU(Box::new(reg1), Box::new(reg2)),
+            "and" => DCoreAsmAST::And(Box::new(reg1), Box::new(reg2)),
+            "or" => DCoreAsmAST::Or(Box::new(reg1), Box::new(reg2)),
+            "xor" => DCoreAsmAST::Xor(Box::new(reg1), Box::new(reg2)),
+            "lsl" => DCoreAsmAST::Lsl(Box::new(reg1), Box::new(reg2)),
+            "lsr" => DCoreAsmAST::Lsr(Box::new(reg1), Box::new(reg2)),
+            "asr" => DCoreAsmAST::Asr(Box::new(reg1), Box::new(reg2)),
+            "cmpe" => DCoreAsmAST::CmpE(Box::new(reg1), Box::new(reg2)),
+            "cmpne" => DCoreAsmAST::CmpNE(Box::new(reg1), Box::new(reg2)),
+            "cmpgt" => DCoreAsmAST::CmpGT(Box::new(reg1), Box::new(reg2)),
+            "cmplt" => DCoreAsmAST::CmpLT(Box::new(reg1), Box::new(reg2)),
+            _ => unreachable!(),
+        },
+    );
 
     // Immediate value may be decimal or hexadecimal
     let immediate = hex_prefix
@@ -222,49 +240,53 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
         .or(text::int(10).map(|s: &str| Atom::Number(s.parse::<i64>().unwrap())))
         .padded();
 
-    let one_immediate_instr = choice((just(".defw"), just(".org"), just(".equ")))
+    let one_immediate_instr = choice((keyword(".defw"), keyword(".org"), keyword(".equ")))
         .padded()
         .then(immediate)
-        .map(|(identifier, imm)| match identifier {
-            ".defw" => DCoreAsmAST::DefW(Box::new(imm)),
-            ".defs" => DCoreAsmAST::DefS(Box::new(imm)),
-            ".org" => DCoreAsmAST::Org(Box::new(imm)),
-            ".equ" => DCoreAsmAST::Equ(Box::new(imm)),
-            _ => unreachable!(),
-        });
+        .map(
+            |(identifier, imm)| match identifier.to_lowercase().as_str() {
+                ".defw" => DCoreAsmAST::DefW(Box::new(imm)),
+                ".defs" => DCoreAsmAST::DefS(Box::new(imm)),
+                ".org" => DCoreAsmAST::Org(Box::new(imm)),
+                ".equ" => DCoreAsmAST::Equ(Box::new(imm)),
+                _ => unreachable!(),
+            },
+        );
 
     let one_register_one_immediate_instr = choice((
-        just("movi"),
-        just("addi"),
-        just("subi"),
-        just("andi"),
-        just("lsli"),
-        just("lsri"),
-        just("bseti"),
-        just("bclri"),
+        keyword("movi"),
+        keyword("addi"),
+        keyword("subi"),
+        keyword("andi"),
+        keyword("lsli"),
+        keyword("lsri"),
+        keyword("bseti"),
+        keyword("bclri"),
     ))
     .padded()
     .then(register)
     .then_ignore(just(',').padded())
     .then(immediate)
-    .map(|((identifier, reg), imm)| match identifier {
-        "movi" => DCoreAsmAST::MovI(Box::new(reg), Box::new(imm)),
-        "addi" => DCoreAsmAST::AddI(Box::new(reg), Box::new(imm)),
-        "subi" => DCoreAsmAST::SubI(Box::new(reg), Box::new(imm)),
-        "andi" => DCoreAsmAST::AndI(Box::new(reg), Box::new(imm)),
-        "lsli" => DCoreAsmAST::LslI(Box::new(reg), Box::new(imm)),
-        "lsri" => DCoreAsmAST::LsrI(Box::new(reg), Box::new(imm)),
-        "bseti" => DCoreAsmAST::BSetI(Box::new(reg), Box::new(imm)),
-        "bclri" => DCoreAsmAST::BClrI(Box::new(reg), Box::new(imm)),
-        _ => unreachable!(),
-    });
+    .map(
+        |((identifier, reg), imm)| match identifier.to_lowercase().as_str() {
+            "movi" => DCoreAsmAST::MovI(Box::new(reg), Box::new(imm)),
+            "addi" => DCoreAsmAST::AddI(Box::new(reg), Box::new(imm)),
+            "subi" => DCoreAsmAST::SubI(Box::new(reg), Box::new(imm)),
+            "andi" => DCoreAsmAST::AndI(Box::new(reg), Box::new(imm)),
+            "lsli" => DCoreAsmAST::LslI(Box::new(reg), Box::new(imm)),
+            "lsri" => DCoreAsmAST::LsrI(Box::new(reg), Box::new(imm)),
+            "bseti" => DCoreAsmAST::BSetI(Box::new(reg), Box::new(imm)),
+            "bclri" => DCoreAsmAST::BClrI(Box::new(reg), Box::new(imm)),
+            _ => unreachable!(),
+        },
+    );
 
     let branch_instr = choice((
-        just("br"),
-        just("jsr"),
-        just("bt"),
-        just("bf"),
-        just("trap"),
+        keyword("br"),
+        keyword("jsr"),
+        keyword("bt"),
+        keyword("bf"),
+        keyword("trap"),
     ))
     .padded()
     .then(choice((
@@ -273,14 +295,16 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
             .map(|s: &str| Atom::Label(s.to_string())),
         immediate,
     )))
-    .map(|(identifier, imm)| match identifier {
-        "br" => DCoreAsmAST::Br(Box::new(imm)),
-        "jsr" => DCoreAsmAST::Jsr(Box::new(imm)),
-        "bt" => DCoreAsmAST::Bt(Box::new(imm)),
-        "bf" => DCoreAsmAST::Bf(Box::new(imm)),
-        "trap" => DCoreAsmAST::Trap(Box::new(imm)),
-        _ => unreachable!(),
-    });
+    .map(
+        |(identifier, imm)| match identifier.to_lowercase().as_str() {
+            "br" => DCoreAsmAST::Br(Box::new(imm)),
+            "jsr" => DCoreAsmAST::Jsr(Box::new(imm)),
+            "bt" => DCoreAsmAST::Bt(Box::new(imm)),
+            "bf" => DCoreAsmAST::Bf(Box::new(imm)),
+            "trap" => DCoreAsmAST::Trap(Box::new(imm)),
+            _ => unreachable!(),
+        },
+    );
 
     let label_definition = text::ident()
         .then_ignore(just(':'))
@@ -289,7 +313,7 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
         .map(DCoreAsmAST::LabelDef);
 
     // Ascii string defintion
-    let ascii_string = choice((just(".ascii"), just(".assho")))
+    let ascii_string = choice((keyword(".ascii"), keyword(".assho")))
         .padded()
         .then(
             just('"')
@@ -297,11 +321,13 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
                 .then_ignore(just('"'))
                 .padded(),
         )
-        .map(|(identifier, string)| match identifier {
-            ".ascii" => DCoreAsmAST::Ascii(Box::new(Atom::String(string))),
-            ".assho" => DCoreAsmAST::Assho(Box::new(Atom::String(string))),
-            _ => unreachable!(),
-        });
+        .map(
+            |(identifier, string)| match identifier.to_lowercase().as_str() {
+                ".ascii" => DCoreAsmAST::Ascii(Box::new(Atom::String(string))),
+                ".assho" => DCoreAsmAST::Assho(Box::new(Atom::String(string))),
+                _ => unreachable!(),
+            },
+        );
 
     // ldw R0, (R1)
     // ldw R0, 0(R1)
@@ -309,7 +335,7 @@ pub fn parser<'src>() -> impl Parser<'src, &'src str, Vec<DCoreAsmAST>> {
     // ldw R2, -21(R2)
     // ldw R3, 0x10(R4)
     // stw R7, $FF(R0)
-    let memory_instr = choice((just("ldw"), just("stw")))
+    let memory_instr = choice((keyword("ldw"), keyword("stw")))
         .padded()
         .then(register)
         .then_ignore(just(',').padded())

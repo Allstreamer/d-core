@@ -1,7 +1,10 @@
+use chumsky::prelude::*;
 use d_core::DCoreCPU;
 use eframe::get_value;
 use egui::{Color32, RichText, TextStyle};
 use egui_extras::{Column, TableBuilder};
+
+use crate::{asm_parser::parser, assembler::setup_cpu_with_ast};
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(default)]
@@ -49,6 +52,12 @@ impl App {
     }
 
     fn memory_view(&mut self, ui: &mut egui::Ui) {
+        let ast = parser().parse(self.program.as_str());
+        if let Ok(ast) = ast.into_result() {
+            self.cpu.mmu.wipe_all();
+            let _ = setup_cpu_with_ast(&mut self.cpu, ast);
+        }
+
         let text_style = TextStyle::Monospace;
 
         let row_height = ui.text_style_height(&text_style);
