@@ -8,6 +8,14 @@ fn unwrap_register(reg: Option<u16>) -> u16 {
     }
 }
 
+const UNINITIALIZED_MEMORY_PATTERN: u16 = 0x0000;
+fn unwrap_memory(mem: Option<u16>) -> u16 {
+    match mem {
+        Some(val) => val,
+        None => UNINITIALIZED_MEMORY_PATTERN,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum DCoreInstruction {
     // Debug Operations
@@ -178,7 +186,7 @@ impl StepDebugInfo {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 pub struct DCoreCPU {
     /// R0-R15 Registers of D-Core CPU
     /// These start out uninitialized to 0x0000
@@ -204,8 +212,8 @@ impl DCoreCPU {
             carry: false,
             halted: false,
             mmu: DCoreMMU {
-                rom_chip: [None; 32768],
-                ram_chip: [None; 32768],
+                rom_chip: Box::new([None; 32768]),
+                ram_chip: Box::new([None; 32768]),
             },
         }
     }
@@ -559,18 +567,17 @@ impl DCoreCPU {
     }
 }
 
-const UNINITIALIZED_MEMORY_PATTERN: u16 = 0x0000;
-fn unwrap_memory(mem: Option<u16>) -> u16 {
-    match mem {
-        Some(val) => val,
-        None => UNINITIALIZED_MEMORY_PATTERN,
-    }
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+pub struct DCoreMMU {
+    #[serde(skip, default = "init_large_array")]
+    pub rom_chip: Box<[Option<u8>; 32768]>,
+
+    #[serde(skip, default = "init_large_array")]
+    pub ram_chip: Box<[Option<u8>; 32768]>,
 }
 
-#[derive(Debug, Clone)]
-pub struct DCoreMMU {
-    pub rom_chip: [Option<u8>; 32768],
-    pub ram_chip: [Option<u8>; 32768],
+fn init_large_array() -> Box<[Option<u8>; 32768]> {
+    Box::new([None; 32768])
 }
 
 impl DCoreMMU {

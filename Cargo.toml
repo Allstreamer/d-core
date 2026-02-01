@@ -2,5 +2,36 @@
 name = "d-core"
 version = "0.1.0"
 edition = "2024"
+authors = ["All"]
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.release]
+opt-level = "z"
 
 [dependencies]
+eframe = { version = "0.33.3", default-features = false, features = [
+  "glow",
+  "default_fonts",
+  "accesskit",
+  "persistence",
+  "wayland",
+  "x11",
+] }
+egui = "0.33.3"
+egui_extras = { version = "0.33.3", default-features = false, features = [
+  "syntect",
+] }
+serde = { version = "1.0", features = ["derive"] }
+anyhow = "1.0"
+serde_bytes = "0.11.19"
+chumsky = "0.12.0"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+
+# web:
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen-futures = "0.4.50"
+web-sys = "0.3.70"
+log = "0.4"
